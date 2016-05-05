@@ -17,6 +17,7 @@ package apache
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -32,7 +33,7 @@ const (
 	// Name of plugin
 	Name = "apache"
 	// Version of plugin
-	Version = 1
+	Version = 2
 	// Type of plugin
 	Type = plugin.CollectorPluginType
 )
@@ -59,10 +60,11 @@ var (
 
 type Apache struct{}
 
-func getMetrics(webserver string, metrics []string) ([]plugin.MetricType, error) {
+func (a *Apache) getResponse(webserver string) (*http.Response, error) {
 	tr := &http.Transport{}
 	client := &http.Client{Transport: tr}
 	resp, err := client.Get(webserver)
+	fmt.Printf("\n\nRESPONSE: %V\n\nRESP BODY: %V\n\nRESP REQ: %V\n\nRESP HEAD: %V\n\n", resp, resp.Body, resp.Request, resp.Header)
 	if err != nil {
 		return nil, err
 	}
@@ -70,8 +72,15 @@ func getMetrics(webserver string, metrics []string) ([]plugin.MetricType, error)
 		defer resp.Body.Close()
 		return nil, errReqFailed
 	}
-	defer resp.Body.Close()
+	return resp, nil
+}
 
+func (a *Apache) getMetrics(webserver string, metrics []string) ([]plugin.MetricType, error) {
+	resp, err := a.getResponse(webserver)
+	defer resp.Body.Close()
+	if err != nil {
+		return nil, err
+	}
 	mtsmap := make(map[string]plugin.MetricType)
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
@@ -132,19 +141,19 @@ func (a *Apache) CollectMetrics(mts []plugin.MetricType) ([]plugin.MetricType, e
 	for i, m := range mts {
 		metrics[i] = m.Namespace()[len(m.Namespace())-1].Value
 	}
-	return getMetrics(webserver.Value, metrics)
+	return a.getMetrics(webserver.Value, metrics)
 }
 
 func (a *Apache) GetMetricTypes(cfg plugin.ConfigType) ([]plugin.MetricType, error) {
 	webservercfg, ok := cfg.Table()["apache_mod_status_url"]
 	if !ok {
-		return getMetrics("http://127.0.0.1:80/server-status?auto", []string{})
+		return a.getMetrics("http://127.0.0.1:80/server-status?auto", []string{})
 	}
 	webserver, ok := webservercfg.(ctypes.ConfigValueStr)
 	if !ok {
 		return nil, errBadWebserver
 	}
-	return getMetrics(webserver.Value, []string{})
+	return a.getMetrics(webserver.Value, []string{})
 }
 
 func (a *Apache) GetConfigPolicy() (*cpolicy.ConfigPolicy, error) {
